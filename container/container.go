@@ -7,13 +7,22 @@ package container
 #include <stdio.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <string.h>
 #include <sched.h>
 #include <signal.h>
 #include <sys/mount.h>
 #define STACK_SIZE (1024*1024)
 static char container_stack[STACK_SIZE];
-
 char* const container_args[]={"/bin/bash",NULL};
+
+struct container{
+        int pid;
+        int ppid;
+        char* name;
+        char* rootfs;
+        char* writefs;
+        char* initcmd;
+};
 
 static void unmount_resource(int sig){
 	umount("/home/dreamlee/go_workspace/miroot/proc");
@@ -24,41 +33,16 @@ static void unmount_resource(int sig){
 	umount("/home/dreamlee/go_workspace/miroot/shm");
 	umount("/home/dreamlee/go_workspace/miroot/run");
 }
-
 int container_main(void* arg){
-	sethostname((char*)arg,10);
+	struct container *c;
+	c=(struct container*)arg;
+	sethostname((*c).name,20);
 	struct sigaction sa;
-	if(mount("proc","/home/dreamlee/go_workspace/miroot/proc","proc",0,NULL)!=0){
-		perror("proc");
-	}
-	
-	if(mount("sysfs","/home/dreamlee/go_workspace/miroot/sysfs","sysfs",0,NULL)!=0){
-                perror("sys");
-        }
-
-	if(mount("none","/home/dreamlee/go_workspace/miroot/tmp","tmpfs",0,NULL)!=0){
-                perror("tmp");
-        }
-
-	if(mount("udev","/home/dreamlee/go_workspace/miroot/dev","devtmpfs",0,NULL)!=0){
-                perror("dev");
-        }
-
-	if(mount("devpts","/home/dreamlee/go_workspace/miroot/dev/pts","devpts",0,NULL)!=0){
-                perror("dev/pts");
-        }
-
-	if(mount("shm","/home/dreamlee/go_workspace/miroot/dev/shm","tmpfs",0,NULL)!=0){
-                perror("dev/shm");
-        }
-
-	if(mount("tmpfs","/home/dreamlee/go_workspace/miroot/run","tmpfs",0,NULL)!=0){
-                perror("proc");
-        }
-
-	if(chdir("/home/dreamlee/go_workspace/miroot")!=0 || chroot("./")!=0){
+	if(chdir((*c).rootfs)!=0 || chroot("./")!=0){
 		perror("chdir/chroot");
 	}
+	system("mount -t proc proc /proc");
+	
 	sigemptyset(&sa.sa_mask);
 	sa.sa_flags=0;
 	sa.sa_handler=unmount_resource;
@@ -68,27 +52,21 @@ int container_main(void* arg){
 	return 1;
 }
 
+void gosystem(char* cmd){
+	system(cmd);
+}
+
 static void chld_handler(int sig){
 	int status;
 	waitpid(-1,&status,WNOHANG);
 }
-
-
-struct container{
-	int pid;
-	int ppid;
-	char* name;
-	char* rootfs;
-	char* writefs;
-	char* initcmd;
-};
 
 void startContainer(int* container_id,struct container *c){
 	sigset_t blockMask,emptyMask;
 	struct sigaction sa;
 	int status;
 	setbuf(stdout,NULL);
-	*container_id=clone(container_main,container_stack+STACK_SIZE,CLONE_NEWUTS  | CLONE_NEWPID | CLONE_NEWUTS | SIGCHLD,(*c).name);
+	*container_id=clone(container_main,container_stack+STACK_SIZE,CLONE_NEWUTS  | CLONE_NEWPID | CLONE_NEWUTS | SIGCHLD ,c);
 	
 	sigemptyset(&sa.sa_mask);
 	sa.sa_flags=0;
@@ -102,18 +80,23 @@ void startContainer(int* container_id,struct container *c){
 		perror("sigprocmask");
 	}
 	c->pid=*container_id;
-	waitpid(*container_id,NULL,0);
+	waitpid(c->pid,NULL,0);
+	_exit(0);
 }
-
 */
 import "C"
 
+import (
+	"fmt"
+	"syscall"
+)
 
 type Container struct {
 	Id	int
 	Pid	int
 	Alias	string
-	RootFs	string
+	RootFs	string "/home/dreamlee/go_workspace/miroot"
+	ParentFs	string
 	WriteFs	string
 	Hostname	string
 	InitCmd	string
@@ -121,7 +104,17 @@ type Container struct {
 
 
 func (c *Container) Start(){
+	if len(c.ParentFs)==0{
+		c.ParentFs="/home/dreamlee/go_workspace/miroot"
+	}
+	if len(c.WriteFs)==0{
+                c.WriteFs="/home/dreamlee/go_workspace/microot/layer/"+c.Hostname
+        }
+	c.RootFs="/home/dreamlee/go_workspace/microot/"+c.Hostname
+	syscall.Mkdir(c.WriteFs,0755)
+	syscall.Mkdir("/home/dreamlee/go_workspace/microot/"+c.Hostname,0755)
+	C.gosystem(C.CString(fmt.Sprintf("mount -t aufs -o br=%s:%s none /home/dreamlee/go_workspace/microot/%s",c.WriteFs,c.ParentFs,c.Hostname)))
 	var container_id C.int
-	c_container := &C.struct_container{name:C.CString(c.Hostname)}
+	c_container := &C.struct_container{name:C.CString(c.Hostname),rootfs:C.CString(c.RootFs)}
 	C.startContainer(&container_id,c_container)
 }
