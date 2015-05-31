@@ -80,13 +80,8 @@ struct container{
 	char* name;
 	char* rootfs;
 	char* writefs;
+	char* initcmd;
 };
-
-
-struct container test(){
-	struct container c;
-	return c;
-}
 
 void startContainer(int* container_id,struct container *c){
 	sigset_t blockMask,emptyMask;
@@ -113,10 +108,6 @@ void startContainer(int* container_id,struct container *c){
 */
 import "C"
 
-import (
-	"fmt"
-)
-
 
 type Container struct {
 	Id	int
@@ -125,6 +116,7 @@ type Container struct {
 	RootFs	string
 	WriteFs	string
 	Hostname	string
+	InitCmd	string
 }
 
 
@@ -132,5 +124,4 @@ func (c *Container) Start(){
 	var container_id C.int
 	c_container := &C.struct_container{name:C.CString(c.Hostname)}
 	C.startContainer(&container_id,c_container)
-	fmt.Println("pid:",container_id)
 }
